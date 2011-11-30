@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 /*
  * Length of "lines changes with every protein"
  * Thanks to wikipedia for the following pseudocode:
@@ -20,8 +21,15 @@
  */
 
 FILE *f;
-#define MAX(a, b) (((a)>(b)) ? (a) : (b))
-#define MIN(a, b) (((a)<(b)) ? (a) : (b))
+char **queue;
+int *lens;
+int *counts;
+int count;
+int offset = 0;
+pthread_mutex_t mutex_count;
+
+#define NUM_THREADS 8
+#define QUEUE_SIZE 4000
 
 int MCSLength(char *str1, int len1, char* str2, int len2) {
 	int** arr = malloc(sizeof(int*)*(len1+1));
@@ -38,7 +46,6 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 				}
 			}
 		}
-		int x,y;
 		//for (x = 0; x <= len1; x++) {
 		//	for (y = 0; y <= len2; y++) {
 		//		printf("%d ", arr[x][y]);
@@ -50,9 +57,6 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 		free(arr[i]);
 
 	free(arr);
-	for (i = index; i < index + local_max; i++)
-		printf("%c", str1[i]);
-	printf("\n");
 	return local_max;
 }
 
@@ -88,31 +92,89 @@ int readLine(char *buff) {
 			default:
 				if ( commentline == 0 ) {
 					startedgene = 1;
-					buff[readchars++] = c;
+					if (c != EOF)
+						buff[readchars++] = c;
 				}
 		}
 	} while (c != EOF);
 	return readchars;
 }
 
+void *threaded_count(void* myId) {
+	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
+	int local_count;
+	int startPos = ((int) myId) * (QUEUE_SIZE/NUM_THREADS);
+	int endPos = startPos + (QUEUE_SIZE/NUM_THREADS);
+
+	int i, j;
+	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
+		local_counts[i] = 0;
+		j = startPos + (i*2);
+		if ((lens[j] != 0) && (lens[j+1] != 0)) {
+			local_counts[i] = MCSLength(queue[j], lens[j], queue[j+1], lens[j+1]);
+			local_count++;
+		}
+		else
+			break;
+	}
+	pthread_mutex_lock (&mutex_count);
+	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
+		counts[offset/2 + startPos/2 + i] = local_counts[i];
+	}
+	count += local_count;
+	pthread_mutex_unlock(&mutex_count);
+}
+
 int main() {
-	f = fopen("dna-small","r");
+	f = fopen("dna-med","r");
 	int count = 0;
+	//pthread
+	int i, rc;
+	pthread_t threads[NUM_THREADS];
+	pthread_attr_t attr;
+	void *status;
 	do {
-		char *str1 = malloc(sizeof(char)*4000);
-		int len1 = readLine(str1);
-		char *str2 = malloc(sizeof(char)*4000);
-		printf("String1: %s\n", str1);
-		int len2 = readLine(str2);
-		printf("String2: %s\n", str2);
-		int out = MCSLength(str1, len1, str2, len2);
-		printf("matching is %d\n", out);
-		free(str1);
-		free(str2);
-		count++;
+		queue = malloc(sizeof(char*)*QUEUE_SIZE);
+		lens = calloc(sizeof(int),QUEUE_SIZE);
+		counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
+		for (i = 0; i < QUEUE_SIZE; i++) {
+			queue[i] = calloc(sizeof(char),32000);
+			lens[i] = readLine(queue[i]);
+		}
+		pthread_attr_init(&attr);
+		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+		pthread_mutex_init(&mutex_count, NULL);
+
+		for (i = 0; i < NUM_THREADS; i++) {
+			rc = pthread_create(&threads[i], &attr, threaded_count, (void *) i);
+			if (rc) {
+				printf("Error");
+				exit(-1);
+			}
+		}
+
+		pthread_attr_destroy(&attr);
+		for (i = 0; i < NUM_THREADS; i++) {
+			rc = pthread_join(threads[i], &status);
+			if (rc) {
+				printf("Error 2");
+				exit(-1);
+			}
+		}
+		pthread_mutex_destroy(&mutex_count);
+		for (i = 0; i < QUEUE_SIZE; i++) {
+			free(queue[i]);
+		}
+		free(queue);
+		free(lens);
+
+		//int out = MCSLength(str1, len1, str2, len2);
+		offset += QUEUE_SIZE;
 	} while (!feof(f));
 	printf("%d\n",count);
 	fclose(f);
+	free(counts);
+	pthread_exit(NULL);
 	return 0;
 }
 
