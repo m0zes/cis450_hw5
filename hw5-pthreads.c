@@ -19,7 +19,7 @@
  *     return C[m,n]
  */
 
-FILE *f = "dna-small";
+FILE *f;
 #define MAX(a, b) (((a)>(b)) ? (a) : (b))
 #define MIN(a, b) (((a)<(b)) ? (a) : (b))
 
@@ -31,14 +31,12 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 	for (i = 1; i <= len1; i++) {
 		for (j = 1; j <= len2; j++) {
 			if (str1[i-1] == str2[j-1]) {
-				printf("%c matches\n", str1[i-1]);
 				arr[i][j] = arr[i-1][j-1] + 1;
 				if (arr[i][j] > local_max) {
 					local_max = arr[i][j];
 					index = i - local_max;
 				}
 			}
-			printf("Array[%d][%d] is %d\n",i,j,arr[i][j]);
 		}
 		int x,y;
 		//for (x = 0; x <= len1; x++) {
@@ -63,11 +61,58 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 //	int ep = sp + (ARRAY_SIZE / NUM_THREADS);
 //	
 //}
+/*
+ * Read file, char by char. headers start with '>' or ';', ignore until newline.
+ * read "gene" until we reach the next header. return int of num of chars in buff
+ */
+int readLine(char *buff) {
+	int buffsize = 400, readchars = 0;
+	//buff = malloc(sizeof(char)*buffsize);
+	int commentline = 0, startedgene = 0;
+	char c;
+	do {
+		c = fgetc(f);
+		switch (c) {
+			case '\n':
+				commentline = 0;
+				break;
+			case ';':
+			case '>':
+				commentline = 1;
+				if (startedgene == 1) {
+					long curr = ftell(f);
+					fseek(f, curr-1, SEEK_SET);
+					return readchars;
+				}
+				break;
+			default:
+				if ( commentline == 0 ) {
+					startedgene = 1;
+					buff[readchars++] = c;
+				}
+		}
+	} while (c != EOF);
+	return readchars;
+}
+
 int main() {
-	char *str1 = "MAQQRRGGFKRRKKVDFIAANKIEVVDYKDTELLKRFISERGKILPRRVTGTSAKNQRKVVNAIKRARVMALLPFVAEDQN";
-	char *str2 = "MASTQNIVEEVQKMLDTYDTNKDGEITKAEAVEYFKGKKAFNPERSAIYLFQVYDKDNDGKITIKELAGDIDFDKALKEYKEKQAKSKQQEAEVEEDIEAFILRHNKDDNTDITKDELIQGFKETGAKDPEKSANFILTEMDTNKDGTITVKELRVYYQKVQKLLNPDQ";
-	int out = MCSLength(str1, 82, str2, 171);
-	printf("matching is %d\n", out);
+	f = fopen("dna-small","r");
+	int count = 0;
+	do {
+		char *str1 = malloc(sizeof(char)*4000);
+		int len1 = readLine(str1);
+		char *str2 = malloc(sizeof(char)*4000);
+		printf("String1: %s\n", str1);
+		int len2 = readLine(str2);
+		printf("String2: %s\n", str2);
+		int out = MCSLength(str1, len1, str2, len2);
+		printf("matching is %d\n", out);
+		free(str1);
+		free(str2);
+		count++;
+	} while (!feof(f));
+	printf("%d\n",count);
+	fclose(f);
 	return 0;
 }
 
