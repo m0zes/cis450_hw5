@@ -1,3 +1,7 @@
+/* 
+ * pthreaded hw5, written by Adam Tygart abd Ryan Hershberger
+ * Could be further optimized by pipelining read operations and not cyclically creating/destroying child threads
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +42,9 @@ pthread_mutex_t mutex_count;
 
 #define QUEUE_SIZE NUM_THREADS*WORK_UNIT
 
+/*
+ * Calculate the LCS of the two strings.
+ */
 int MCSLength(char *str1, int len1, char* str2, int len2) {
 	int** arr = malloc(sizeof(int*)*(len1+1));
 	if ( arr == 0 ) {
@@ -70,7 +77,7 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 
 /*
  * Read file, char by char. headers start with '>' or ';', ignore until newline.
- * read "gene" until we reach the next header. return int of num of chars in buff
+ * read "gene" until we reach the next header. return int of num of chars in buff[i]
  */
 int readLine(char **buff, int i) {
 	int readchars = 0;
@@ -114,6 +121,9 @@ int readLine(char **buff, int i) {
 	return readchars;
 }
 
+/*
+ * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
+ */
 void *threaded_count(void* myId) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
 	int local_count = 0;
@@ -140,6 +150,9 @@ void *threaded_count(void* myId) {
 	return (void *) 0;
 }
 
+/*
+ * Take a file-name on the command line, open it and read portions of the file at a time. start threads to calcluate MCS. Find the max and average MCSs
+ */
 int main(int argc, char* argv[]) {
 	if (argc != 2 ) {
 		printf("Please specify a file on the command line\n");
