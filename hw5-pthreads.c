@@ -20,18 +20,26 @@
  *     return C[m,n]
  */
 
+#define NUM_THREADS 9
+#define WORKER_THREADS 8
+#define INPUT_THREADS 1
+#define QUEUE_SIZE 40000
+#define TRUE 1
+#define FALSE 0
+ 
 FILE *f;
-char **queue;
+char **queue1;
+char **queue2;
 int *lens1;
-int *counts1;
 int *lens2;
-int *counts2;
+int *counts;
 int comp_count;
 int offset = 0;
 pthread_mutex_t mutex_count;
+int input_num = 1;
+int stop = FALSE;
+int last_run = FALSE;
 
-#define NUM_THREADS 8
-#define QUEUE_SIZE 40000
 
 int MCSLength(char *str1, int len1, char* str2, int len2) {
 	int** arr = malloc(sizeof(int*)*(len1+1));
@@ -45,7 +53,6 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
 				if (arr[i][j] > local_max)
 					local_max = arr[i][j];
 			}
-
 		}
 	}
 	for (i = 0; i <= len1; i++)
@@ -79,7 +86,7 @@ int readLine(char *buff) {
 				}
 				break;
 			default:
-				if ( commentline == 0 ) {
+				if (commentline == 0 ) {
 					startedgene = 1;
 					if (c != EOF)
 						buff[readchars++] = c;
@@ -89,71 +96,98 @@ int readLine(char *buff) {
 	return readchars;
 }
 
-void *threaded_count(void* myId) {
-	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
-	int local_count = 0;
-	int startPos = ((int) myId) * (QUEUE_SIZE/NUM_THREADS);
-	int endPos = startPos + (QUEUE_SIZE/NUM_THREADS);
-
-	int i, j;
-	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
-		local_counts[i] = 0;
-		j = startPos + (i*2);
-		if ((lens[j] != 0) && (lens[j+1] != 0)) {
-			local_counts[i] = MCSLength(queue[j], lens[j], queue[j+1], lens[j+1]);
-			local_count++;
+void input_thread(){
+	if(last_run == TRUE){return;}
+	printf("input\n");
+	if(input_num == 1){
+		queue1 = malloc(sizeof(char*)*QUEUE_SIZE);
+		lens1 = calloc(sizeof(int),QUEUE_SIZE);
+		int i;
+		for (i = 0; i < QUEUE_SIZE; i++) {
+			queue1[i] = calloc(sizeof(char),100000);
+			lens1[i] = readLine(queue1[i]);
 		}
-		else
-			break;
+	
 	}
-	pthread_mutex_lock (&mutex_count);
-	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
-		counts[(offset/2) + (startPos/2) + i] = local_counts[i];
+	else if(input_num ==2){
+		queue2 = malloc(sizeof(char*)*QUEUE_SIZE);
+		lens2 = calloc(sizeof(int),QUEUE_SIZE);
+		int i;
+		for (i = 0; i < QUEUE_SIZE; i++) {
+				queue2[i] = calloc(sizeof(char),100000);
+				lens2[i] = readLine(queue2[i]);
+		}
+	
 	}
-	comp_count += local_count;
-	pthread_mutex_unlock(&mutex_count);
-	return (void *) 0;
 }
 
-void input_thread(void* input_num){
-	if(input_num == 1){
+void *threaded_count(void* myId) {
 	
-	
+	if((int)myId == 0){
+		input_thread();
 	}
-	elseif(input_num ==2){
-	
+	else{
+		int local_counts[QUEUE_SIZE/WORKER_THREADS/2];
+		int local_count = 0;
+		int startPos = ((int) myId) * (QUEUE_SIZE/WORKER_THREADS);
+		int endPos = startPos + (QUEUE_SIZE/WORKER_THREADS);
+
+		int i, j;
+		for (i = 0; i < QUEUE_SIZE/WORKER_THREADS/2; i++) {
+			local_counts[i] = 0;
+			j = startPos + (i*2);
+			if(input_num == 1){
+				if ((lens2[j] != 0) && (lens2[j+1] != 0)) {
+					local_counts[i] = MCSLength(queue2[j], lens2[j], queue2[j+1], lens2[j+1]);
+				}
+				local_count++;
+			}else if(input_num == 2){
+				if ((lens1[j] != 0) && (lens1[j+1] != 0)) {
+					local_counts[i] = MCSLength(queue1[j], lens1[j], queue1[j+1], lens1[j+1]);
+				}
+				local_count++;
+			}
+			else
+				break;
+		}
+		pthread_mutex_lock (&mutex_count);
+		for (i = 0; i < QUEUE_SIZE/WORKER_THREADS/2; i++) {
+			counts[(offset/2) + (startPos/2) + i] = local_counts[i];
+		}
+		printf("local_count: %d\ncomp_count: %d\n",local_count, comp_count);
+		comp_count += local_count;
+		pthread_mutex_unlock(&mutex_count);
+		return (void *) 0;
 	}
-
-
-
-
 }
 
 int main() {
-	f = fopen("dna-big","r");
+	f = fopen("dna-small","r");
 	//pthread
-	int i, rc;
+	int i, j, rc;
 	pthread_t threads[NUM_THREADS];
 	pthread_attr_t attr;
 	void *status;
+	
+	stop = FALSE;
+	last_run = FALSE;
 	do {
-		queue1 = malloc(sizeof(char*)*QUEUE_SIZE);
-		lens1 = calloc(sizeof(int),QUEUE_SIZE);
-		queue2 = malloc(sizeof(char*)*QUEUE_SIZE);
-		lens2 = calloc(sizeof(int),QUEUE_SIZE);
-		
 		counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
-		rc = pthread_create(&threads[0], &attr, input_thread, (void *) 1);
-		
-		
-		for (i = 0; i < QUEUE_SIZE; i++) {
-			queue1[i] = calloc(sizeof(char),32000);
-			lens1[i] = readLine(queue[i]);
-		}
+
 		pthread_attr_init(&attr);
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 		pthread_mutex_init(&mutex_count, NULL);
-
+		
+		if(offset == 0){
+			input_thread();
+		}
+		
+		if(input_num == 1){
+			input_num = 2;
+		}else if(input_num == 2){
+			input_num = 1;
+		}
+		
 		for (i = 0; i < NUM_THREADS; i++) {
 			rc = pthread_create(&threads[i], &attr, threaded_count, (void *) i);
 			if (rc) {
@@ -163,23 +197,40 @@ int main() {
 		}
 
 		pthread_attr_destroy(&attr);
-		for (i = 0; i < NUM_THREADS; i++) {
+		for (j = 0; j < NUM_THREADS; j++) {
 			rc = pthread_join(threads[i], &status);
 			if (rc) {
 				printf("Error 2");
 				exit(-1);
 			}
 		}
+		
 		pthread_mutex_destroy(&mutex_count);
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			free(queue[i]);
+			if((input_num == 1) && (queue2[i] != NULL)){
+				free(queue2[i]);
+			}else if((input_num == 2) && (queue1[i] != NULL)){
+				free(queue1[i]);
+			}
 		}
-		free(queue);
-		free(lens);
+
+		if((input_num == 1) && (queue2 != NULL) && (lens2 != NULL)){
+			free(queue2);
+			free(lens2);
+		}else if((input_num == 2) && (queue1 != NULL) && (lens1 != NULL)){
+			free(queue1);
+			free(lens1);
+		}
 
 		//int out = MCSLength(str1, len1, str2, len2);
 		offset += QUEUE_SIZE;
-	} while (!feof(f));
+		if(feof(f)){
+			if(last_run == TRUE){
+				stop = TRUE;
+			}
+			last_run = TRUE;
+		}
+	} while (stop == FALSE);
 	unsigned long total = 0;
 	int longest = 0, longest_loc = -1;
 	for (i = 0; i < comp_count; i++) {
