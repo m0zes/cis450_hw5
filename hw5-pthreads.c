@@ -24,53 +24,40 @@ FILE *f;
 char **queue;
 int *lens;
 int *counts;
-int count;
+int comp_count;
 int offset = 0;
 pthread_mutex_t mutex_count;
 
 #define NUM_THREADS 8
-#define QUEUE_SIZE 4000
+#define QUEUE_SIZE 40000
 
 int MCSLength(char *str1, int len1, char* str2, int len2) {
 	int** arr = malloc(sizeof(int*)*(len1+1));
-	int i, j, local_max = 0, index = 0;
+	int i, j, local_max = 0;
 	for (i = 0; i <= len1; i++)
 		arr[i] = calloc(len2+1, sizeof(int));
 	for (i = 1; i <= len1; i++) {
 		for (j = 1; j <= len2; j++) {
 			if (str1[i-1] == str2[j-1]) {
 				arr[i][j] = arr[i-1][j-1] + 1;
-				if (arr[i][j] > local_max) {
+				if (arr[i][j] > local_max)
 					local_max = arr[i][j];
-					index = i - local_max;
-				}
 			}
+
 		}
-		//for (x = 0; x <= len1; x++) {
-		//	for (y = 0; y <= len2; y++) {
-		//		printf("%d ", arr[x][y]);
-		//	}
-		//	printf("\n");
-		//}
 	}
 	for (i = 0; i <= len1; i++)
 		free(arr[i]);
-
 	free(arr);
 	return local_max;
 }
 
-//int mcs(int id) {
-//	int sp = ((int) id) * (ARRAY_SIZE / NUM_THREADS);
-//	int ep = sp + (ARRAY_SIZE / NUM_THREADS);
-//	
-//}
 /*
  * Read file, char by char. headers start with '>' or ';', ignore until newline.
  * read "gene" until we reach the next header. return int of num of chars in buff
  */
 int readLine(char *buff) {
-	int buffsize = 400, readchars = 0;
+	int readchars = 0;
 	//buff = malloc(sizeof(char)*buffsize);
 	int commentline = 0, startedgene = 0;
 	char c;
@@ -102,7 +89,7 @@ int readLine(char *buff) {
 
 void *threaded_count(void* myId) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
-	int local_count;
+	int local_count = 0;
 	int startPos = ((int) myId) * (QUEUE_SIZE/NUM_THREADS);
 	int endPos = startPos + (QUEUE_SIZE/NUM_THREADS);
 
@@ -119,15 +106,15 @@ void *threaded_count(void* myId) {
 	}
 	pthread_mutex_lock (&mutex_count);
 	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
-		counts[offset/2 + startPos/2 + i] = local_counts[i];
+		counts[(offset/2) + (startPos/2) + i] = local_counts[i];
 	}
-	count += local_count;
+	comp_count += local_count;
 	pthread_mutex_unlock(&mutex_count);
+	return (void *) 0;
 }
 
 int main() {
-	f = fopen("dna-med","r");
-	int count = 0;
+	f = fopen("dna-big","r");
 	//pthread
 	int i, rc;
 	pthread_t threads[NUM_THREADS];
@@ -171,7 +158,18 @@ int main() {
 		//int out = MCSLength(str1, len1, str2, len2);
 		offset += QUEUE_SIZE;
 	} while (!feof(f));
-	printf("%d\n",count);
+	unsigned long total = 0;
+	int longest = 0, longest_loc = -1;
+	for (i = 0; i < comp_count; i++) {
+		total += counts[i];
+		if (counts[i] > longest) {
+			longest = counts[i];
+			longest_loc = i;
+		}
+	}
+
+	printf("Longest LCS: %d, is the %dth pair in the file\n", longest, longest_loc);
+	printf("Average: %Lf\n",((long double) total)/comp_count);
 	fclose(f);
 	free(counts);
 	pthread_exit(NULL);
