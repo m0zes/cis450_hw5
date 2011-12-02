@@ -28,14 +28,30 @@ int comp_count;
 int offset = 0;
 pthread_mutex_t mutex_count;
 
+#ifndef NUM_THREADS
 #define NUM_THREADS 8
-#define QUEUE_SIZE 40000
+#endif
+
+#ifndef WORK_UNIT
+#define WORK_UNIT 4800
+#endif
+
+#define QUEUE_SIZE NUM_THREADS*WORK_UNIT
 
 int MCSLength(char *str1, int len1, char* str2, int len2) {
 	int** arr = malloc(sizeof(int*)*(len1+1));
+	if ( arr == 0 ) {
+		printf("Couldn't allocate memory for the MCS array\n");
+		exit(-1);
+	}
 	int i, j, local_max = 0;
-	for (i = 0; i <= len1; i++)
+	for (i = 0; i <= len1; i++) {
 		arr[i] = calloc(len2+1, sizeof(int));
+		if ( arr[i] == 0 ) {
+			printf("Couldn't allocate memory for the MCS subarray\n");
+			exit(-1);
+		}
+	}
 	for (i = 1; i <= len1; i++) {
 		for (j = 1; j <= len2; j++) {
 			if (str1[i-1] == str2[j-1]) {
@@ -56,12 +72,23 @@ int MCSLength(char *str1, int len1, char* str2, int len2) {
  * Read file, char by char. headers start with '>' or ';', ignore until newline.
  * read "gene" until we reach the next header. return int of num of chars in buff
  */
-int readLine(char *buff) {
+int readLine(char **buff, int i) {
 	int readchars = 0;
-	//buff = malloc(sizeof(char)*buffsize);
 	int commentline = 0, startedgene = 0;
+	int buffStepSize = 4000;
+	int buffSize = 4000;
+	buff[i] = malloc(sizeof(char)*buffSize);
 	char c;
 	do {
+		if (((readchars) >= buffSize) && (buffSize != 0)) {
+			buffSize += buffStepSize;
+			char* temp_buff = realloc(buff[i],sizeof(char)*buffSize);
+			buff[i] = temp_buff;
+		}
+		if (buff[i] == 0) {
+			printf("Couldn't allocate memory for the buffer\n");
+			exit(-2);
+		}
 		c = fgetc(f);
 		switch (c) {
 			case '\n':
@@ -80,7 +107,7 @@ int readLine(char *buff) {
 				if ( commentline == 0 ) {
 					startedgene = 1;
 					if (c != EOF)
-						buff[readchars++] = c;
+						buff[i][readchars++] = c;
 				}
 		}
 	} while (c != EOF);
@@ -113,8 +140,16 @@ void *threaded_count(void* myId) {
 	return (void *) 0;
 }
 
-int main() {
-	f = fopen("dna-big","r");
+int main(int argc, char* argv[]) {
+	if (argc != 2 ) {
+		printf("Please specify a file on the command line\n");
+		exit(-1);
+	}
+	f = fopen(argv[1],"r");
+	if ( f == 0 ) {
+		printf("Couldn't open file\n");
+		exit(-1);
+	}
 	//pthread
 	int i, rc;
 	pthread_t threads[NUM_THREADS];
@@ -123,10 +158,18 @@ int main() {
 	do {
 		queue = malloc(sizeof(char*)*QUEUE_SIZE);
 		lens = calloc(sizeof(int),QUEUE_SIZE);
-		counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
+		int *temp_counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
+		if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
+			printf("Couldn't allocate memory for the work queues\n");
+			exit(-1);
+		}
+		counts = temp_counts;
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			queue[i] = calloc(sizeof(char),32000);
-			lens[i] = readLine(queue[i]);
+			lens[i] = readLine(queue, i);
+			if (( queue[i] == 0 )) {
+				printf("Couldn't allocate memory for the work subqueues\n");
+				exit(-1);
+			}
 		}
 		pthread_attr_init(&attr);
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
@@ -135,7 +178,7 @@ int main() {
 		for (i = 0; i < NUM_THREADS; i++) {
 			rc = pthread_create(&threads[i], &attr, threaded_count, (void *) i);
 			if (rc) {
-				printf("Error");
+				printf("Error creating threads\n");
 				exit(-1);
 			}
 		}
@@ -144,7 +187,7 @@ int main() {
 		for (i = 0; i < NUM_THREADS; i++) {
 			rc = pthread_join(threads[i], &status);
 			if (rc) {
-				printf("Error 2");
+				printf("Error Joining threads\n");
 				exit(-1);
 			}
 		}
