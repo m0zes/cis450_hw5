@@ -22,8 +22,10 @@
 
 FILE *f;
 char **queue;
-int *lens;
-int *counts;
+int *lens1;
+int *counts1;
+int *lens2;
+int *counts2;
 int comp_count;
 int offset = 0;
 pthread_mutex_t mutex_count;
@@ -113,6 +115,20 @@ void *threaded_count(void* myId) {
 	return (void *) 0;
 }
 
+void input_thread(void* input_num){
+	if(input_num == 1){
+	
+	
+	}
+	elseif(input_num ==2){
+	
+	}
+
+
+
+
+}
+
 int main() {
 	f = fopen("dna-big","r");
 	//pthread
@@ -121,12 +137,18 @@ int main() {
 	pthread_attr_t attr;
 	void *status;
 	do {
-		queue = malloc(sizeof(char*)*QUEUE_SIZE);
-		lens = calloc(sizeof(int),QUEUE_SIZE);
+		queue1 = malloc(sizeof(char*)*QUEUE_SIZE);
+		lens1 = calloc(sizeof(int),QUEUE_SIZE);
+		queue2 = malloc(sizeof(char*)*QUEUE_SIZE);
+		lens2 = calloc(sizeof(int),QUEUE_SIZE);
+		
 		counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
+		rc = pthread_create(&threads[0], &attr, input_thread, (void *) 1);
+		
+		
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			queue[i] = calloc(sizeof(char),32000);
-			lens[i] = readLine(queue[i]);
+			queue1[i] = calloc(sizeof(char),32000);
+			lens1[i] = readLine(queue[i]);
 		}
 		pthread_attr_init(&attr);
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
