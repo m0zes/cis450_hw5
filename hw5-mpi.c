@@ -124,10 +124,10 @@ int readLine(char **buff, int i) {
 /*
  * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
  */
-void *threaded_count(void* myId) {
-	int *local_counts = realloc(local_counts,(queue_size/num_threads/2)*sizeof(int));
+void *threaded_count(int myId) {
+	int *local_counts = malloc((queue_size/num_threads/2)*sizeof(int));
 	int local_count = 0;
-	int startPos = ((int) myId) * (queue_size/num_threads);
+	int startPos = (myId) * (queue_size/num_threads);
 	int endPos = startPos + (queue_size/num_threads);
 
 	int i, j;
@@ -142,16 +142,21 @@ void *threaded_count(void* myId) {
 			break;
 	}
 	if (myId == 0 ) {
-		reduce_vars[0] = local_counts;
+		for (j = 0; j < local_count; j++) {
+			reduce_vars[0][j] = local_counts[j];
+		}
 		comp_count += local_count;
-		for (j = 0; j < num_threads; j++) {
+		printf("Copied local (rank 0) counts to reduce_vars[0]\n");
+		for (j = 1; j < num_threads; j++) {
 			int recv_count;
 			MPI_Status status;
 			MPI_Recv(&recv_count, 1, MPI_INT, j, 1105, MPI_COMM_WORLD, &status);
 			MPI_Recv(reduce_vars[i], recv_count, MPI_INT, j, 1106, MPI_COMM_WORLD, &status);
+			printf("Received (rank %d) counts to reduce_vars[%d]\n", j, j);
 			comp_count += recv_count;
 		}
 	} else {
+		printf("Sending (rank %d) counts to reduce_vars[%d]\n", myId, myId);
 		MPI_Send(&local_count, 1, MPI_INT, 0, 1105, MPI_COMM_WORLD);
 		MPI_Send(local_counts, local_count, MPI_INT, 0, 1106, MPI_COMM_WORLD);
 		free(local_counts);
@@ -179,22 +184,25 @@ int main(int argc, char* argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-	num_threads = rank;
+	num_threads = size;
 	queue_size = WORK_UNIT * size;
 	
+	printf("WORK_UNIT = %d, queue_size = %d, size = %d\n", WORK_UNIT, queue_size, size);
 	do {
-		queue = malloc(sizeof(char*)*queue_size);
-		lens = calloc(sizeof(int),queue_size);
-		int *temp_counts = (int*) realloc(counts, (queue_size + offset)/2 * sizeof(int));
-		if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
-			printf("Couldn't allocate memory for the work queues\n");
-			exit(-1);
-		}
-		counts = temp_counts;
+		int t = 0;
 		if (rank == 0) {
+			queue = malloc(sizeof(char*)*queue_size);
+			lens = calloc(sizeof(int),queue_size);
+			int *temp_counts = (int*) realloc(counts, (queue_size + offset)/2 * sizeof(int));
+			if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
+				printf("Couldn't allocate memory for the work queues\n");
+				exit(-1);
+			}
+			counts = temp_counts;
 			reduce_vars = malloc(sizeof(int*)*size);
 			for (i = 0; i < queue_size; i++) {
 				lens[i] = readLine(queue, i);
+				t += lens[i];
 				if (( queue[i] == 0 )) {
 					printf("Couldn't allocate memory for the work subqueues\n");
 					exit(-1);
@@ -205,14 +213,16 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		MPI_Bcast(queue, queue_size, MPI_CHAR, 0, MPI_COMM_WORLD);
-		threaded_count(&rank);
+		MPI_Bcast(queue, queue_size * t, MPI_CHAR, 0, MPI_COMM_WORLD);
+		MPI_Bcast(lens, queue_size, MPI_INT, 0, MPI_COMM_WORLD);
+		threaded_count(rank);
 
 		if (rank == 0) {
 			for (i = 0; i < size; i++) {
 				int j;
 				int startPos = i * (queue_size/num_threads);
 				for (j = 0; j < queue_size/num_threads/2; j++) {
+					printf("reduce_vars[%d][%d] = %c\n", i, j, reduce_vars[i][j]);
 					counts[(offset/2) + (startPos/2) + j] = reduce_vars[i][j];
 				}
 				free(reduce_vars[i]);
@@ -221,12 +231,14 @@ int main(int argc, char* argv[]) {
 				free(queue[i]);
 			}
 			free(reduce_vars);
+			if (feof(f))
+				break;
 		}
 		free(queue);
 		free(lens);
 
 		offset += queue_size;
-	} while (!feof(f));
+	} while (0);
 	unsigned long total = 0;
 	int longest = 0, longest_loc = -1;
 	for (i = 0; i < comp_count; i++) {
