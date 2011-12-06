@@ -152,11 +152,11 @@ void *threaded_count(int myId) {
 			MPI_Status status;
 			MPI_Recv(&recv_count, 1, MPI_INT, j, 1105, MPI_COMM_WORLD, &status);
 			MPI_Recv(reduce_vars[i], recv_count, MPI_INT, j, 1106, MPI_COMM_WORLD, &status);
-			printf("Received (rank %d) counts to reduce_vars[%d]\n", j, j);
+			printf("Received (rank %d) counts to reduce_vars[%d] (%d records) first is %d\n", j, j, recv_count, reduce_vars[i][0]);
 			comp_count += recv_count;
 		}
 	} else {
-		printf("Sending (rank %d) counts to reduce_vars[%d]\n", myId, myId);
+		printf("Sending (rank %d) counts to reduce_vars[%d] (%d records)\n", myId, myId, local_count);
 		MPI_Send(&local_count, 1, MPI_INT, 0, 1105, MPI_COMM_WORLD);
 		MPI_Send(local_counts, local_count, MPI_INT, 0, 1106, MPI_COMM_WORLD);
 		free(local_counts);
@@ -189,10 +189,9 @@ int main(int argc, char* argv[]) {
 	
 	printf("WORK_UNIT = %d, queue_size = %d, size = %d\n", WORK_UNIT, queue_size, size);
 	do {
-		int t = 0;
+		queue = malloc(sizeof(char*)*queue_size);
+		lens = calloc(sizeof(int),queue_size);
 		if (rank == 0) {
-			queue = malloc(sizeof(char*)*queue_size);
-			lens = calloc(sizeof(int),queue_size);
 			int *temp_counts = (int*) realloc(counts, (queue_size + offset)/2 * sizeof(int));
 			if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
 				printf("Couldn't allocate memory for the work queues\n");
@@ -202,7 +201,6 @@ int main(int argc, char* argv[]) {
 			reduce_vars = malloc(sizeof(int*)*size);
 			for (i = 0; i < queue_size; i++) {
 				lens[i] = readLine(queue, i);
-				t += lens[i];
 				if (( queue[i] == 0 )) {
 					printf("Couldn't allocate memory for the work subqueues\n");
 					exit(-1);
@@ -213,8 +211,19 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		MPI_Bcast(queue, queue_size * t, MPI_CHAR, 0, MPI_COMM_WORLD);
+		printf("BCast lens\n");
 		MPI_Bcast(lens, queue_size, MPI_INT, 0, MPI_COMM_WORLD);
+		printf("BCast queue\n");
+		for (i = 0; i < queue_size; i++) {
+			if (rank != 0) 
+				queue[i] = malloc((sizeof(char)*lens[i])+1);
+			if (queue[i] == 0) {
+				printf("Couldn't allocate memory for the work subqueues\n");
+				exit(-1);
+			}
+			MPI_Bcast(queue[i], lens[i], MPI_CHAR, 0, MPI_COMM_WORLD);
+		}
+
 		threaded_count(rank);
 
 		if (rank == 0) {
@@ -222,37 +231,40 @@ int main(int argc, char* argv[]) {
 				int j;
 				int startPos = i * (queue_size/num_threads);
 				for (j = 0; j < queue_size/num_threads/2; j++) {
-					printf("reduce_vars[%d][%d] = %c\n", i, j, reduce_vars[i][j]);
+					//printf("reduce_vars[%d][%d] = %c\n", i, j, reduce_vars[i][j]);
 					counts[(offset/2) + (startPos/2) + j] = reduce_vars[i][j];
 				}
 				free(reduce_vars[i]);
-			}
-			for (i = 0; i < queue_size; i++) {
-				free(queue[i]);
 			}
 			free(reduce_vars);
 			if (feof(f))
 				break;
 		}
+		for (i = 0; i < queue_size; i++) {
+			printf("rank = %d, i = %i, queue_size =%d \n", rank, i, queue_size);
+			free(queue[i]);
+		}
 		free(queue);
 		free(lens);
 
 		offset += queue_size;
-	} while (0);
-	unsigned long total = 0;
-	int longest = 0, longest_loc = -1;
-	for (i = 0; i < comp_count; i++) {
-		total += counts[i];
-		if (counts[i] > longest) {
-			longest = counts[i];
-			longest_loc = i;
+	} while (1);
+	if (rank == 0) {
+		unsigned long total = 0;
+		int longest = 0, longest_loc = -1;
+		for (i = 0; i < comp_count; i++) {
+			total += counts[i];
+			if (counts[i] > longest) {
+				longest = counts[i];
+				longest_loc = i;
+			}
 		}
+	
+		printf("Longest LCS: %d, is the %dth pair in the file\n", longest, longest_loc);
+		printf("Average: %Lf\n",((long double) total)/comp_count);
+		fclose(f);
+		free(counts);
 	}
-
-	printf("Longest LCS: %d, is the %dth pair in the file\n", longest, longest_loc);
-	printf("Average: %Lf\n",((long double) total)/comp_count);
-	fclose(f);
-	free(counts);
 	MPI_Finalize();
 	return 0;
 }
