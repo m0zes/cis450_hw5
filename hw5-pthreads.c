@@ -164,7 +164,7 @@ void *threaded_count(void* myId) {
 int main() {
 	f = fopen("dna-small","r");
 	//pthread
-	int i, j, rc;
+	int i, j, k, rc;
 	pthread_t threads[NUM_THREADS];
 	pthread_attr_t attr;
 	void *status;
@@ -196,23 +196,34 @@ int main() {
 			}
 		}
 
-		pthread_attr_destroy(&attr);
+//		pthread_attr_destroy(&attr);
+		
+		
+		
+		char* temp = malloc(sizeof(char)*1000);
+		
+		for(i = 0; i < strnlen(queue1[0], 1000); i++){
+			temp = queue1[i];
+		}
+		
 		for (j = 0; j < NUM_THREADS; j++) {
-			rc = pthread_join(threads[i], &status);
+			rc = pthread_join(threads[j], &status);
 			if (rc) {
 				printf("Error 2");
 				exit(-1);
 			}
 		}
-		
+		queue1[0] = temp;
 		pthread_mutex_destroy(&mutex_count);
-		for (i = 0; i < QUEUE_SIZE; i++) {
-			if((input_num == 1) && (queue2[i] != NULL)){
-				free(queue2[i]);
-			}else if((input_num == 2) && (queue1[i] != NULL)){
-				free(queue1[i]);
+		for (k = 0; k < QUEUE_SIZE; k++) {
+			if((input_num == 1) && (queue2[k] != NULL)){
+				free(queue2[k]);
+			}else if((input_num == 2) && (queue1[k] != NULL)){
+				free(queue1[k]);
 			}
 		}
+
+		pthread_attr_destroy(&attr); //moved this from previous comment
 
 		if((input_num == 1) && (queue2 != NULL) && (lens2 != NULL)){
 			free(queue2);
