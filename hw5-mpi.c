@@ -146,17 +146,14 @@ void *threaded_count(int myId) {
 			reduce_vars[0][j] = local_counts[j];
 		}
 		comp_count += local_count;
-		printf("Copied local (rank 0) counts to reduce_vars[0]\n");
 		for (j = 1; j < num_threads; j++) {
 			int recv_count;
 			MPI_Status status;
 			MPI_Recv(&recv_count, 1, MPI_INT, j, 1105, MPI_COMM_WORLD, &status);
-			MPI_Recv(reduce_vars[i], recv_count, MPI_INT, j, 1106, MPI_COMM_WORLD, &status);
-			printf("Received (rank %d) counts to reduce_vars[%d] (%d records) first is %d\n", j, j, recv_count, reduce_vars[i][0]);
+			MPI_Recv((reduce_vars[j]), recv_count, MPI_INT, j, 1106, MPI_COMM_WORLD, &status);
 			comp_count += recv_count;
 		}
 	} else {
-		printf("Sending (rank %d) counts to reduce_vars[%d] (%d records)\n", myId, myId, local_count);
 		MPI_Send(&local_count, 1, MPI_INT, 0, 1105, MPI_COMM_WORLD);
 		MPI_Send(local_counts, local_count, MPI_INT, 0, 1106, MPI_COMM_WORLD);
 		free(local_counts);
@@ -186,8 +183,8 @@ int main(int argc, char* argv[]) {
 
 	num_threads = size;
 	queue_size = WORK_UNIT * size;
+	int state = 1;
 	
-	printf("WORK_UNIT = %d, queue_size = %d, size = %d\n", WORK_UNIT, queue_size, size);
 	do {
 		queue = malloc(sizeof(char*)*queue_size);
 		lens = calloc(sizeof(int),queue_size);
@@ -211,9 +208,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		printf("BCast lens\n");
 		MPI_Bcast(lens, queue_size, MPI_INT, 0, MPI_COMM_WORLD);
-		printf("BCast queue\n");
 		for (i = 0; i < queue_size; i++) {
 			if (rank != 0) 
 				queue[i] = malloc((sizeof(char)*lens[i])+1);
@@ -223,7 +218,11 @@ int main(int argc, char* argv[]) {
 			}
 			MPI_Bcast(queue[i], lens[i], MPI_CHAR, 0, MPI_COMM_WORLD);
 		}
-
+		if ((rank == 0) && (feof(f))) {
+			state = 0;
+		}
+		
+		MPI_Bcast(&state, 1, MPI_INT, 0, MPI_COMM_WORLD);
 		threaded_count(rank);
 
 		if (rank == 0) {
@@ -231,24 +230,20 @@ int main(int argc, char* argv[]) {
 				int j;
 				int startPos = i * (queue_size/num_threads);
 				for (j = 0; j < queue_size/num_threads/2; j++) {
-					//printf("reduce_vars[%d][%d] = %c\n", i, j, reduce_vars[i][j]);
 					counts[(offset/2) + (startPos/2) + j] = reduce_vars[i][j];
 				}
 				free(reduce_vars[i]);
 			}
 			free(reduce_vars);
-			if (feof(f))
-				break;
 		}
 		for (i = 0; i < queue_size; i++) {
-			printf("rank = %d, i = %i, queue_size =%d \n", rank, i, queue_size);
 			free(queue[i]);
 		}
 		free(queue);
 		free(lens);
 
 		offset += queue_size;
-	} while (1);
+	} while (state);
 	if (rank == 0) {
 		unsigned long total = 0;
 		int longest = 0, longest_loc = -1;
