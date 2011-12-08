@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
 				printf("Couldn't allocate memory for the work subqueues\n");
 				exit(-1);
 			}
-			cudaMalloc((void*)&(dev_queue[i]), (lens[i])*sizeof(char));
+			cudaMalloc((void**)&(dev_queue[i]), (lens[i])*sizeof(char));
 			cudaMemcpy(dev_queue[i], queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
 		}
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
