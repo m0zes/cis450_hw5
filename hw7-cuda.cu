@@ -24,19 +24,15 @@
  */
 
 FILE *f;
-char **queue;
-int *lens;
-int *counts;
 int comp_count;
 int offset = 0;
-pthread_mutex_t mutex_count;
 
 #ifndef NUM_THREADS
-#define NUM_THREADS 8
+#define NUM_THREADS 1000
 #endif
 
 #ifndef WORK_UNIT
-#define WORK_UNIT 4800
+#define WORK_UNIT 100
 #endif
 
 #define QUEUE_SIZE NUM_THREADS*WORK_UNIT
@@ -162,14 +158,29 @@ int main(int argc, char* argv[]) {
 		printf("Couldn't open file\n");
 		exit(-1);
 	}
+	char **queue;
+	int *lens;
+	int *counts;
+	char **dev_queue;
+	int *dev_lens;
+	int *dev_counts;
 	//pthread
 	int i, rc;
-	pthread_t threads[NUM_THREADS];
-	pthread_attr_t attr;
 	void *status;
+	int perThread = WORK_UNIT;
+	int totalSize = QUEUE_SIZE;
+	int size = NUM_THREADS;
+	int numThreadsPerBlock = 100;
+	int numBlocks = size / numThreadsPerBlock;
+	int totalThreads = numThreadsPerBlock * numBlocks;
+	
 	do {
 		queue = malloc(sizeof(char*)*QUEUE_SIZE);
+		cudaMalloc((void**)&dev_queue, sizeof(char*)*QUEUE_SIZE);
+
 		lens = calloc(sizeof(int),QUEUE_SIZE);
+		cudaMalloc((void**)&dev_lens, sizeof(int)*QUEUE_SIZE);
+
 		int *temp_counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
 		if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
 			printf("Couldn't allocate memory for the work queues\n");
@@ -182,35 +193,28 @@ int main(int argc, char* argv[]) {
 				printf("Couldn't allocate memory for the work subqueues\n");
 				exit(-1);
 			}
+			cudaMalloc((void*)&(dev_queue[i]), lens[i]*sizeof(char));
+			cudaMemcpy(dev_queue[i], queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
 		}
-		pthread_attr_init(&attr);
-		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-		pthread_mutex_init(&mutex_count, NULL);
+		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
 
-		for (i = 0; i < NUM_THREADS; i++) {
-			rc = pthread_create(&threads[i], &attr, threaded_count, (void *) i);
-			if (rc) {
-				printf("Error creating threads\n");
-				exit(-1);
-			}
-		}
+		cudaMalloc((void**)&dev_counts, (QUEUE_SIZE*sizeof(int))/2);
+		cudaMemset( dev_counts, 0, (QUEUE_SIZE*sizeof(int))/2);
 
-		pthread_attr_destroy(&attr);
-		for (i = 0; i < NUM_THREADS; i++) {
-			rc = pthread_join(threads[i], &status);
-			if (rc) {
-				printf("Error Joining threads\n");
-				exit(-1);
-			}
-		}
-		pthread_mutex_destroy(&mutex_count);
+		dim3 dimGrid(numBlocks);
+		dim3 dimBlock(numThreadsPerBlock);
+		threaded_count<<< dimGrid, dimBlock >>>(dev_counts, dev_queue, dev_lens, perThread, totalThreads);
+		cudaThreadSynchronize();
+		for (i = 0; i < QUEUE_SIZE)
+
 		for (i = 0; i < QUEUE_SIZE; i++) {
+			cudaFree(dev_queue[i])
 			free(queue[i]);
 		}
+		cudaFree(dev_queue);
 		free(queue);
+		cudaFree(dev_lens);
 		free(lens);
-
-		//int out = MCSLength(str1, len1, str2, len2);
 		offset += QUEUE_SIZE;
 	} while (!feof(f));
 	unsigned long total = 0;
