@@ -40,18 +40,16 @@ int offset = 0;
 /*
  * Calculate the LCS of the two strings.
  */
-__global__ int MCSLength(char *str1, int len1, char* str2, int len2) {
-	int** arr = malloc(sizeof(int*)*(len1+1));
+__device__ int MCSLength(char *str1, int len1, char* str2, int len2) {
+	int** arr = (int**) malloc(sizeof(int*)*(len1+1));
 	if ( arr == 0 ) {
 		printf("Couldn't allocate memory for the MCS array\n");
-		exit(-1);
 	}
 	int i, j, local_max = 0;
 	for (i = 0; i <= len1; i++) {
-		arr[i] = calloc(len2+1, sizeof(int));
+		arr[i] = (int*)malloc((len2+1) *sizeof(int));
 		if ( arr[i] == 0 ) {
 			printf("Couldn't allocate memory for the MCS subarray\n");
-			exit(-1);
 		}
 	}
 	for (i = 1; i <= len1; i++) {
@@ -79,12 +77,12 @@ int readLine(char **buff, int i) {
 	int commentline = 0, startedgene = 0;
 	int buffStepSize = 4000;
 	int buffSize = 4000;
-	buff[i] = malloc(sizeof(char)*buffSize);
+	buff[i] = (char*)malloc(sizeof(char)*buffSize);
 	char c;
 	do {
 		if (((readchars) >= buffSize) && (buffSize != 0)) {
 			buffSize += buffStepSize;
-			char* temp_buff = realloc(buff[i],sizeof(char)*buffSize);
+			char* temp_buff = (char*)realloc(buff[i],sizeof(char)*buffSize);
 			buff[i] = temp_buff;
 		}
 		if (buff[i] == 0) {
@@ -119,7 +117,7 @@ int readLine(char **buff, int i) {
 /*
  * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
  */
-__global__ void threaded_count(int myId) {
+__global__ void threaded_count( int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
 	int local_count = 0;
 	int startPos = ((int) myId) * (QUEUE_SIZE/NUM_THREADS);
@@ -136,12 +134,10 @@ __global__ void threaded_count(int myId) {
 		else
 			break;
 	}
-	pthread_mutex_lock (&mutex_count);
 	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
 		counts[(offset/2) + (startPos/2) + i] = local_counts[i];
 	}
 	comp_count += local_count;
-	pthread_mutex_unlock(&mutex_count);
 	return (void *) 0;
 }
 
@@ -205,12 +201,17 @@ int main(int argc, char* argv[]) {
 		dim3 dimBlock(numThreadsPerBlock);
 		threaded_count<<< dimGrid, dimBlock >>>(dev_counts, dev_queue, dev_lens, perThread, totalThreads);
 		cudaThreadSynchronize();
-		for (i = 0; i < QUEUE_SIZE)
+		int* temp = malloc(sizeof(int)*QUEUE_SIZE/2);
+		cudaMemcpy(temp, dev_counts, (QUEUE_SIZE*sizeof(int))/2, cudaMemcpyDeviceToHost);
+		for (i = 0; i < QUEUE_SIZE/2; i++)
+			counts[offset+i] = temp[i];
 
 		for (i = 0; i < QUEUE_SIZE; i++) {
 			cudaFree(dev_queue[i])
 			free(queue[i]);
 		}
+		cudaFree(dev_counts);
+		free(temp);
 		cudaFree(dev_queue);
 		free(queue);
 		cudaFree(dev_lens);
