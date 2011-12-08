@@ -120,25 +120,24 @@ int readLine(char **buff, int i) {
 __global__ void threaded_count( int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
 	int local_count = 0;
-	int startPos = ((int) myId) * (QUEUE_SIZE/NUM_THREADS);
+	int startPos = ((int) 0) * (QUEUE_SIZE/NUM_THREADS);
 	int endPos = startPos + (QUEUE_SIZE/NUM_THREADS);
 
 	int i, j;
 	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
 		local_counts[i] = 0;
 		j = startPos + (i*2);
-		if ((lens[j] != 0) && (lens[j+1] != 0)) {
-			local_counts[i] = MCSLength(queue[j], lens[j], queue[j+1], lens[j+1]);
+		if ((dev_lens[j] != 0) && (dev_lens[j+1] != 0)) {
+			local_counts[i] = MCSLength(dev_queue[j], dev_lens[j], dev_queue[j+1], dev_lens[j+1]);
 			local_count++;
 		}
 		else
 			break;
 	}
 	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
-		counts[(offset/2) + (startPos/2) + i] = local_counts[i];
+		dev_counts[(offset/2) + (startPos/2) + i] = local_counts[i];
 	}
 	comp_count += local_count;
-	return (void *) 0;
 }
 
 /*
@@ -171,10 +170,10 @@ int main(int argc, char* argv[]) {
 	int totalThreads = numThreadsPerBlock * numBlocks;
 	
 	do {
-		queue = malloc(sizeof(char*)*QUEUE_SIZE);
+		queue = (char**)malloc(sizeof(char*)*QUEUE_SIZE);
 		cudaMalloc((void**)&dev_queue, sizeof(char*)*QUEUE_SIZE);
 
-		lens = calloc(sizeof(int),QUEUE_SIZE);
+		lens = (int*)calloc(sizeof(int),QUEUE_SIZE);
 		cudaMalloc((void**)&dev_lens, sizeof(int)*QUEUE_SIZE);
 
 		int *temp_counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
@@ -189,7 +188,7 @@ int main(int argc, char* argv[]) {
 				printf("Couldn't allocate memory for the work subqueues\n");
 				exit(-1);
 			}
-			cudaMalloc((void*)&(dev_queue[i]), lens[i]*sizeof(char));
+			cudaMalloc((void*)&(dev_queue[i]), (lens[i])*sizeof(char));
 			cudaMemcpy(dev_queue[i], queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
 		}
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
@@ -201,7 +200,7 @@ int main(int argc, char* argv[]) {
 		dim3 dimBlock(numThreadsPerBlock);
 		threaded_count<<< dimGrid, dimBlock >>>(dev_counts, dev_queue, dev_lens, perThread, totalThreads);
 		cudaThreadSynchronize();
-		int* temp = malloc(sizeof(int)*QUEUE_SIZE/2);
+		int* temp = (int*) malloc(sizeof(int)*QUEUE_SIZE/2);
 		cudaMemcpy(temp, dev_counts, (QUEUE_SIZE*sizeof(int))/2, cudaMemcpyDeviceToHost);
 		for (i = 0; i < QUEUE_SIZE/2; i++)
 			counts[offset+i] = temp[i];
