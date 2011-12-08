@@ -117,7 +117,7 @@ int readLine(char **buff, int i) {
 /*
  * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
  */
-__global__ void threaded_count( int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
+__global__ void threaded_count(int offset, int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
 	int local_count = 0;
 	int startPos = ((int) 0) * (QUEUE_SIZE/NUM_THREADS);
@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
 
 		dim3 dimGrid(numBlocks);
 		dim3 dimBlock(numThreadsPerBlock);
-		threaded_count<<< dimGrid, dimBlock >>>(dev_counts, dev_queue, dev_lens, perThread, totalThreads);
+		threaded_count<<< dimGrid, dimBlock >>>(offset, dev_counts, dev_queue, dev_lens, perThread, totalThreads);
 		cudaThreadSynchronize();
 		int* temp = (int*) malloc(sizeof(int)*QUEUE_SIZE/2);
 		cudaMemcpy(temp, dev_counts, (QUEUE_SIZE*sizeof(int))/2, cudaMemcpyDeviceToHost);
