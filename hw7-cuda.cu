@@ -219,11 +219,15 @@ int main(int argc, char* argv[]) {
 				exit(-1);
 			}
 			printf("D\n");
-			cudaMalloc((void**)(dev_queue[i]), (lens[i])*sizeof(char));
+			char *d_temp;
+			cudaMalloc((void**)&d_temp, (lens[i])*sizeof(char)+1);
 			checkCUDAError("Cuda Malloc");
 			printf("E\n");			
+			char *h_temp = queue[i];
 			
-			cudaMemcpy(dev_queue[i], queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
+			cudaMemcpy(d_temp, h_temp, lens[i]*sizeof(char), cudaMemcpyHostToDevice);
+			printf("F\n");
+			dev_queue[i] = d_temp;
 		}
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
 
