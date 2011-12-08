@@ -37,6 +37,19 @@ int offset = 0;
 
 #define QUEUE_SIZE NUM_THREADS*WORK_UNIT
 
+
+void checkCUDAError(const char *msg)
+{
+    cudaError_t err = cudaGetLastError();
+    if( cudaSuccess != err) 
+    {
+        fprintf(stderr, "Cuda error: %s: %s.\n", msg, 
+                             cudaGetErrorString( err) );
+        exit(EXIT_FAILURE);
+    }                         
+}
+
+
 /*
  * Calculate the LCS of the two strings.
  */
@@ -117,7 +130,7 @@ int readLine(char **buff, int i) {
 /*
  * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
  */
-__global__ void threaded_count(int offset, int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
+__global__ void threaded_count(int offset, int* dev_completed_count, int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
 	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
 	int local_count = 0;
 	int startPos = ((int) 0) * (QUEUE_SIZE/NUM_THREADS);
@@ -137,7 +150,7 @@ __global__ void threaded_count(int offset, int* dev_counts, char** dev_queue, in
 	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
 		dev_counts[(offset/2) + (startPos/2) + i] = local_counts[i];
 	}
-	comp_count += local_count;
+	atomicAdd(dev_completed_count, local_count);
 }
 
 /*
@@ -168,27 +181,48 @@ int main(int argc, char* argv[]) {
 	int numThreadsPerBlock = 100;
 	int numBlocks = size / numThreadsPerBlock;
 	int totalThreads = numThreadsPerBlock * numBlocks;
+	int* dev_completed_count;
+	cudaMalloc((void**)&dev_completed_count, sizeof(int));
+	printf("we get this far!\n");
+
+	counts = (int*)calloc(sizeof(int),QUEUE_SIZE);
 	
+
+
 	do {
 		queue = (char**)malloc(sizeof(char*)*QUEUE_SIZE);
 		cudaMalloc((void**)&dev_queue, sizeof(char*)*QUEUE_SIZE);
+		
+		printf("A\n");
 
 		lens = (int*)calloc(sizeof(int),QUEUE_SIZE);
 		cudaMalloc((void**)&dev_lens, sizeof(int)*QUEUE_SIZE);
 
+		printf("B\n");
+		
 		int *temp_counts = (int*) realloc(counts, (QUEUE_SIZE + offset)/2 * sizeof(int));
+		
+		printf("C\n");
+		
 		if (( queue == 0 ) || (lens == 0) || (temp_counts == 0)) {
 			printf("Couldn't allocate memory for the work queues\n");
 			exit(-1);
 		}
 		counts = temp_counts;
+		
+		printf("This is a TEST\n");
+		
 		for (i = 0; i < QUEUE_SIZE; i++) {
 			lens[i] = readLine(queue, i);
 			if (( queue[i] == 0 )) {
 				printf("Couldn't allocate memory for the work subqueues\n");
 				exit(-1);
 			}
-			cudaMalloc((void**)&(dev_queue[i]), (lens[i])*sizeof(char));
+			printf("D\n");
+			cudaMalloc((void**)(dev_queue[i]), (lens[i])*sizeof(char));
+			checkCUDAError("Cuda Malloc");
+			printf("E\n");			
+			
 			cudaMemcpy(dev_queue[i], queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
 		}
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
@@ -196,9 +230,12 @@ int main(int argc, char* argv[]) {
 		cudaMalloc((void**)&dev_counts, (QUEUE_SIZE*sizeof(int))/2);
 		cudaMemset( dev_counts, 0, (QUEUE_SIZE*sizeof(int))/2);
 
+		printf("A1\n");
+
+
 		dim3 dimGrid(numBlocks);
 		dim3 dimBlock(numThreadsPerBlock);
-		threaded_count<<< dimGrid, dimBlock >>>(offset, dev_counts, dev_queue, dev_lens, perThread, totalThreads);
+		threaded_count<<< dimGrid, dimBlock >>>(offset,dev_completed_count, dev_counts, dev_queue, dev_lens, perThread, totalThreads);
 		cudaThreadSynchronize();
 		int* temp = (int*) malloc(sizeof(int)*QUEUE_SIZE/2);
 		cudaMemcpy(temp, dev_counts, (QUEUE_SIZE*sizeof(int))/2, cudaMemcpyDeviceToHost);
