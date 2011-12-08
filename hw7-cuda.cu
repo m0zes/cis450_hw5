@@ -232,7 +232,6 @@ int main(int argc, char* argv[]) {
 	printf("Average: %Lf\n",((long double) total)/comp_count);
 	fclose(f);
 	free(counts);
-	pthread_exit(NULL);
 	return 0;
 }
 
