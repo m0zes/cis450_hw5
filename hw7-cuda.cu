@@ -207,7 +207,7 @@ int main(int argc, char* argv[]) {
 			counts[offset+i] = temp[i];
 
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			cudaFree(dev_queue[i])
+			cudaFree(dev_queue[i]);
 			free(queue[i]);
 		}
 		cudaFree(dev_counts);
