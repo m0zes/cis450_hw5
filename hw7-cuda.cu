@@ -223,11 +223,17 @@ int main(int argc, char* argv[]) {
 			cudaMalloc((void**)&d_temp, (lens[i])*sizeof(char)+1);
 			checkCUDAError("Cuda Malloc");
 			printf("E\n");			
-			char *h_temp = queue[i];
 			
-			cudaMemcpy(d_temp, h_temp, lens[i]*sizeof(char), cudaMemcpyHostToDevice);
+			cudaMemcpy(d_temp, queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
 			printf("F\n");
-			dev_queue[i] = d_temp;
+			cudaMemset(dev_queue[i],(void*) &d_temp, sizeof(char*));
+
+			//Allocate a fresh "row" array of pointers in host memory
+			//Recursively allocate and copy each "column" array from the host source data to device memory
+			//Assign those device pointers to the "fresh" row array of pointers
+			//Allocate another row array of pointers on the GPU
+			//Copy the host array of device row pointers to the device column array
+			//dev_queue[i] = d_temp;
 		}
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
 
