@@ -28,11 +28,11 @@ int comp_count;
 int offset = 0;
 
 #ifndef NUM_THREADS
-#define NUM_THREADS 1000
+#define NUM_THREADS 4
 #endif
 
 #ifndef WORK_UNIT
-#define WORK_UNIT 100
+#define WORK_UNIT 400
 #endif
 
 #define QUEUE_SIZE NUM_THREADS*WORK_UNIT
@@ -60,7 +60,7 @@ __device__ int MCSLength(char *str1, int len1, char* str2, int len2) {
 	}
 	int i, j, local_max = 0;
 	for (i = 0; i <= len1; i++) {
-		arr[i] = (int*)malloc((len2+1) *sizeof(int));
+		arr[i] = (int*)malloc((len2+1)*sizeof(int));
 		if ( arr[i] == 0 ) {
 			printf("Couldn't allocate memory for the MCS subarray\n");
 		}
@@ -130,27 +130,43 @@ int readLine(char **buff, int i) {
 /*
  * Is the worker function for a thread, calculate your chunk of the global data, calculate the MCS of each pair, copy the counts off to the global counts once locked
  */
-__global__ void threaded_count(int offset, int* dev_completed_count, int* dev_counts, char** dev_queue, int* dev_lens, int perThread, int totalThreads) {
-	int local_counts[QUEUE_SIZE/NUM_THREADS/2];
+__global__ void threaded_count(int* completed_count, int* counts, char* queue, int* lens) {
+	int local_work_unit = blockDim.x*blockIdx.x;
+	int local_counts[WORK_UNIT/2];
 	int local_count = 0;
-	int startPos = ((int) 0) * (QUEUE_SIZE/NUM_THREADS);
-	int endPos = startPos + (QUEUE_SIZE/NUM_THREADS);
+	int startPos = (threadIdx.x) + (local_work_unit);
+	int endPos = startPos + (local_work_unit);
+	char* str1;
+	char* str2;
+	int strlen1, strlen2;
 
-	int i, j;
-	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
+	int i, j, k;
+	for (i = 0; i < WORK_UNIT/2; i++) {
 		local_counts[i] = 0;
 		j = startPos + (i*2);
-		if ((dev_lens[j] != 0) && (dev_lens[j+1] != 0)) {
-			local_counts[i] = MCSLength(dev_queue[j], dev_lens[j], dev_queue[j+1], dev_lens[j+1]);
+		if ((lens[j] != 0) && (lens[j+1] != 0)) {
+		//dev_lens needs to hold starting positions of the current string in dev_queue
+			str1 = (char*) malloc(lens[j]+1*sizeof(char));
+			str2 = (char*) malloc(lens[j+1]+1*sizeof(char));
+			strlen1 = lens[j+1] - lens[j];
+			strlen2 = lens[j+2] - lens[j+1];
+			for (k = 0; k < strlen1; k++)
+				str1[k] = queue[lens[j] + k];
+			for (k = 0; k < strlen2; k++)
+				str2[k] = queue[lens[j+1] + k];
+				
+			local_counts[i] = MCSLength(str1, strlen1, str2, strlen2);
+			free(str1);
+			free(str2);
 			local_count++;
 		}
 		else
 			break;
 	}
-	for (i = 0; i < QUEUE_SIZE/NUM_THREADS/2; i++) {
-		dev_counts[(offset/2) + (startPos/2) + i] = local_counts[i];
+	for (i = 0; i < WORK_UNIT/2; i++) {
+		counts[(startPos/2) + i] = local_counts[i];
 	}
-	atomicAdd(dev_completed_count, local_count);
+	atomicAdd(completed_count, local_count);
 }
 
 /*
@@ -169,12 +185,11 @@ int main(int argc, char* argv[]) {
 	char **queue;
 	int *lens;
 	int *counts;
-	char **dev_queue;
+	char *dev_queue;
 	int *dev_lens;
 	int *dev_counts;
 	//pthread
-	int i, rc;
-	void *status;
+	int i;
 	int perThread = WORK_UNIT;
 	int totalSize = QUEUE_SIZE;
 	int size = NUM_THREADS;
@@ -191,12 +206,10 @@ int main(int argc, char* argv[]) {
 
 	do {
 		queue = (char**)malloc(sizeof(char*)*QUEUE_SIZE);
-		cudaMalloc((void**)&dev_queue, sizeof(char*)*QUEUE_SIZE);
-		
 		printf("A\n");
 
-		lens = (int*)calloc(sizeof(int),QUEUE_SIZE);
-		cudaMalloc((void**)&dev_lens, sizeof(int)*QUEUE_SIZE);
+		lens = (int*)calloc(sizeof(int),QUEUE_SIZE+1);
+		cudaMalloc((void**)&dev_lens, sizeof(int)*(QUEUE_SIZE +1));
 
 		printf("B\n");
 		
@@ -210,31 +223,27 @@ int main(int argc, char* argv[]) {
 		}
 		counts = temp_counts;
 		
-		printf("This is a TEST\n");
+		printf("This is a TEST %d\n", QUEUE_SIZE);
 		
+		int t = 0;
+		char *dev_queue_flat = (char *) malloc(sizeof(char));
+		char *temp_flat;
+		lens[0] = 0;
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			lens[i] = readLine(queue, i);
+			lens[i+1] = t + readLine(queue, i);
+			temp_flat = (char *) realloc(dev_queue_flat, (lens[i+1] + 1) * sizeof(char));
+			dev_queue_flat = temp_flat;
+			int j;
+			for (j = 0; j <= lens[i+1] - t; j++)
+				dev_queue_flat[t+j] = queue[i][j];
+			t = lens[i+1];
 			if (( queue[i] == 0 )) {
 				printf("Couldn't allocate memory for the work subqueues\n");
 				exit(-1);
 			}
-			printf("D\n");
-			char *d_temp;
-			cudaMalloc((void**)&d_temp, (lens[i])*sizeof(char)+1);
-			checkCUDAError("Cuda Malloc");
-			printf("E\n");			
-			
-			cudaMemcpy(d_temp, queue[i], lens[i]*sizeof(char), cudaMemcpyHostToDevice);
-			printf("F\n");
-			cudaMemset(dev_queue[i],(void*) &d_temp, sizeof(char*));
-
-			//Allocate a fresh "row" array of pointers in host memory
-			//Recursively allocate and copy each "column" array from the host source data to device memory
-			//Assign those device pointers to the "fresh" row array of pointers
-			//Allocate another row array of pointers on the GPU
-			//Copy the host array of device row pointers to the device column array
-			//dev_queue[i] = d_temp;
 		}
+		cudaMalloc((void**)&dev_queue, (t * sizeof(char)));
+		cudaMemcpy(dev_queue, dev_queue_flat, t*sizeof(char), cudaMemcpyHostToDevice);
 		cudaMemcpy(dev_lens, lens, QUEUE_SIZE*sizeof(int), cudaMemcpyHostToDevice);
 
 		cudaMalloc((void**)&dev_counts, (QUEUE_SIZE*sizeof(int))/2);
@@ -243,9 +252,9 @@ int main(int argc, char* argv[]) {
 		printf("A1\n");
 
 
-		dim3 dimGrid(numBlocks);
-		dim3 dimBlock(numThreadsPerBlock);
-		threaded_count<<< dimGrid, dimBlock >>>(offset,dev_completed_count, dev_counts, dev_queue, dev_lens, perThread, totalThreads);
+		dim3 numBlocks(NUM_THREADS);
+		dim3 threadsPerBlock(WORK_UNIT);
+		threaded_count<<< numBlocks, threadsPerBlock >>>(dev_completed_count, dev_counts, dev_queue, dev_lens);
 		cudaThreadSynchronize();
 		int* temp = (int*) malloc(sizeof(int)*QUEUE_SIZE/2);
 		cudaMemcpy(temp, dev_counts, (QUEUE_SIZE*sizeof(int))/2, cudaMemcpyDeviceToHost);
@@ -253,9 +262,9 @@ int main(int argc, char* argv[]) {
 			counts[offset+i] = temp[i];
 
 		for (i = 0; i < QUEUE_SIZE; i++) {
-			cudaFree(dev_queue[i]);
 			free(queue[i]);
 		}
+		cudaFree(dev_queue);
 		cudaFree(dev_counts);
 		free(temp);
 		cudaFree(dev_queue);
